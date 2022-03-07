@@ -1,29 +1,7 @@
-use puzzle::Puzzle;
+use puzzle::{Direction, Metric, Puzzle, Strategy};
 use std::env;
 
 mod puzzle;
-
-#[derive(Clone, Copy, Debug)]
-enum Directions {
-    Up,
-    Down,
-    Left,
-    Right,
-}
-
-#[derive(Debug)]
-enum Strategy {
-    BFS,
-    DFS,
-    AStar,
-}
-
-#[derive(Debug)]
-enum Order {
-    Neighbourhood([Directions; 4]),
-    Hamming,
-    Manhattan,
-}
 
 enum ArgsError {
     NotEnoughArguments,
@@ -33,11 +11,10 @@ enum ArgsError {
 
 #[derive(Debug)]
 struct Config {
-    strategy: Strategy,
-    order: Order,
-    input_file: String,
-    solution_file: String,
-    stats_file: String,
+    pub strategy: Strategy,
+    pub input_file: String,
+    pub solution_file: String,
+    pub stats_file: String,
 }
 
 impl Config {
@@ -54,33 +31,36 @@ impl Config {
         let stats_file = args[5].clone();
 
         let strategy = match strategy {
-            "bfs" => Strategy::BFS,
-            "dfs" => Strategy::DFS,
-            "astr" => Strategy::AStar,
-            _ => return Err(ArgsError::InvalidStrategy),
-        };
-
-        let order = match order {
-            "hamm" => Order::Hamming,
-            "manh" => Order::Manhattan,
-            _ => {
-                let mut directions = [Directions::Up; 4];
+            "bfs" | "dfs" => {
+                let mut directions = [Direction::Up; 4];
                 for (i, direction) in order.to_uppercase().chars().enumerate() {
                     match direction {
-                        'U' => directions[i] = Directions::Up,
-                        'D' => directions[i] = Directions::Down,
-                        'L' => directions[i] = Directions::Left,
-                        'R' => directions[i] = Directions::Right,
+                        'U' => directions[i] = Direction::Up,
+                        'D' => directions[i] = Direction::Down,
+                        'L' => directions[i] = Direction::Left,
+                        'R' => directions[i] = Direction::Right,
                         _ => return Err(ArgsError::InvalidOrder),
                     }
                 }
-                Order::Neighbourhood(directions)
+                if strategy == "bfs" {
+                    Strategy::BFS(directions)
+                } else {
+                    Strategy::DFS(directions)
+                }
             }
+            "astr" => {
+                let metric = match order {
+                    "manh" => Metric::Manhattan,
+                    "hamm" => Metric::Hamming,
+                    _ => return Err(ArgsError::InvalidOrder),
+                };
+                Strategy::AStar(metric)
+            }
+            _ => return Err(ArgsError::InvalidStrategy),
         };
 
         Ok(Config {
             strategy,
-            order,
             input_file,
             solution_file,
             stats_file,
@@ -116,5 +96,7 @@ fn main() {
         std::process::exit(1);
     });
 
-    println!("{:?}", config);
+    let solution = puzzle.solve(&config.strategy);
+
+    println!("{}", solution);
 }
