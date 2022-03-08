@@ -3,6 +3,8 @@ use std::fs;
 use std::hash::Hash;
 use std::time::Instant;
 
+const MAX_DEPTH: usize = 20;
+
 #[derive(Debug)]
 pub enum FileReadError {
     FileNotFound,
@@ -10,7 +12,7 @@ pub enum FileReadError {
     FileIsCorrupt,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Direction {
     Up,
     Down,
@@ -166,7 +168,7 @@ impl Puzzle {
         panic!("Puzzle is not solvable!");
     }
 
-    fn move_empty(&mut self, direction: &Direction) -> bool {
+    fn move_empty(&self, direction: &Direction) -> Option<Puzzle> {
         let (y, x) = self.empty_position();
         let height = self.grid.len();
         let width = self.grid[0].len();
@@ -178,38 +180,40 @@ impl Puzzle {
         match direction {
             Direction::Up => {
                 if y == 0 {
-                    return false;
+                    return None;
                 }
                 new_y = y - 1;
             }
             Direction::Down => {
                 if y == height - 1 {
-                    return false;
+                    return None;
                 }
                 new_y = y + 1;
             }
             Direction::Left => {
                 if x == 0 {
-                    return false;
+                    return None;
                 }
                 new_x = x - 1;
             }
             Direction::Right => {
                 if x == width - 1 {
-                    return false;
+                    return None;
                 }
                 new_x = x + 1;
             }
         }
 
+        let mut new_puzzle = self.clone();
+
         // Swap the empty cell with the cell in the given direction.
-        self.grid[y][x] = self.grid[new_y][new_x];
-        self.grid[new_y][new_x] = 0;
+        new_puzzle.grid[y][x] = new_puzzle.grid[new_y][new_x];
+        new_puzzle.grid[new_y][new_x] = 0;
 
         // Push the direction to the path which lead to this new state.
-        self.path.push(direction.clone());
+        new_puzzle.path.push(direction.clone());
 
-        return true;
+        return Some(new_puzzle);
     }
 
     /// Returns vector of all possible moves from the current state in the given order.
@@ -217,8 +221,7 @@ impl Puzzle {
         let mut neighbours = Vec::new();
 
         for direction in order {
-            let mut new_puzzle = self.clone();
-            if new_puzzle.move_empty(direction) {
+            if let Some(new_puzzle) = self.move_empty(direction) {
                 neighbours.push(new_puzzle);
             }
         }
@@ -228,17 +231,19 @@ impl Puzzle {
 
     pub fn solve(&self, strategy: &Strategy) -> SolveResult {
         match strategy {
-            Strategy::BFS(order) => self.solve_basic(order, true),
-            Strategy::DFS(order) => self.solve_basic(order, false),
+            Strategy::BFS(order) => self.solve_basic(order, false),
+            Strategy::DFS(order) => self.solve_basic(order, true),
             Strategy::AStar(metric) => self.solve_priority(metric),
         }
     }
 
-    fn solve_basic(&self, order: &[Direction; 4], is_bfs: bool) -> SolveResult {
+    fn solve_basic(&self, order: &[Direction; 4], is_dfs: bool) -> SolveResult {
+        // Queue of puzzles to be solved.
         let mut queue = VecDeque::new();
+        // HashSet of already visited puzzles. We use it to check if we've already visited a puzzle.
         let mut visited = HashSet::new();
 
-        // Push the initial state to the queue.
+        // Push the initial state to the queue and visited.
         queue.push_back(self.clone());
         visited.insert(self.clone());
 
@@ -247,45 +252,50 @@ impl Puzzle {
 
         let mut processed_states = 0;
 
+        // Start timer from now to either finding the solution or processing all possible states.
         let start_time = Instant::now();
 
         // If we're doing DFS, we need to reverse the order of the moves.
         let mut order = order.to_vec();
-        if !is_bfs {
+        if is_dfs {
             order.reverse();
         }
         let order: &[Direction; 4] = &[order[0], order[1], order[2], order[3]];
 
         // While the queue is not empty, we keep iterating.
         while !queue.is_empty() {
-            // Pop the first element from the queue.
             let mut current_state: Puzzle;
-
-            if is_bfs {
-                current_state = queue.pop_front().unwrap();
-            } else {
+            // Depending on whetever we're doing BFS or DFS, we pop the first or last element.
+            if is_dfs {
                 current_state = queue.pop_back().unwrap();
-
-                if current_state.path.len() > 20 {
-                    continue;
-                }
+            } else {
+                current_state = queue.pop_front().unwrap();
             }
+
+            // Insert current state into already visited states so that we don't visit it again.
+            // visited.insert(current_state.clone());
 
             processed_states += 1;
 
+            // Update the max depth of the search tree.
             if current_state.path.len() > max_depth {
                 max_depth = current_state.path.len();
             }
 
-            // If the current state is the goal state, we're done.
+            // If the current state is solved, we've found the solution.
             if current_state.is_solved() {
                 return SolveResult {
                     path: Some(current_state.path.clone()),
                     max_depth,
                     visited_states: visited.len(),
                     processed_states,
-                    time_spent: start_time.elapsed().as_millis(),
+                    time_spent: start_time.elapsed().as_nanos(),
                 };
+            }
+
+            // For DFS skip generating neighbour states if we're at MAX_DEPTH depth.
+            if is_dfs && current_state.path.len() == MAX_DEPTH {
+                continue;
             }
 
             // Get the neighbour states of the current state.
@@ -293,10 +303,17 @@ impl Puzzle {
 
             // Iterate over the neighbours.
             for neighbour in neighbour_states {
-                // If the neighbour is not visited, we push it to the queue and mark it as visited.
-                if !visited.contains(&neighbour) {
-                    queue.push_back(neighbour.clone());
+                if let Some(previous) = visited.get(&neighbour) {
+                    if previous.path.len() > neighbour.path.len() {
+                        // If the state is already visited, but the path to it is shorter this time, we add it anyway,
+                        // because maybe this time it'll be able to reach the solution.
+                        visited.replace(neighbour.clone());
+                        queue.push_back(neighbour.clone());
+                    }
+                } else {
+                    // If the neighbour is not visited, we push him to the queue and mark him as visited.
                     visited.insert(neighbour.clone());
+                    queue.push_back(neighbour.clone());
                 }
             }
         }
@@ -307,7 +324,7 @@ impl Puzzle {
             max_depth,
             visited_states: visited.len(),
             processed_states,
-            time_spent: start_time.elapsed().as_millis(),
+            time_spent: start_time.elapsed().as_nanos(),
         }
     }
 
@@ -334,7 +351,11 @@ impl std::fmt::Display for SolveResult {
         write!(f, "Max depth: {}\n", self.max_depth)?;
         write!(f, "Visited states: {}\n", self.visited_states)?;
         write!(f, "Processed states: {}\n", self.processed_states)?;
-        write!(f, "Time spent: {}\n", self.time_spent)?;
+        write!(
+            f,
+            "Time spent: {:.3}\n",
+            self.time_spent as f32 * f32::powi(10.0, -6)
+        )?;
         Ok(())
     }
 }
