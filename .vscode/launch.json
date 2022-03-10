@@ -21,7 +21,7 @@
             },
             "args": [
                 "dfs",
-                "DRUL",
+                "LUDR",
                 "puzzle.txt",
                 "output.txt",
                 "stats.txt"

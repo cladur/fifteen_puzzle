@@ -18,6 +18,7 @@ pub enum Direction {
     Down,
     Left,
     Right,
+    None,
 }
 
 #[derive(Debug)]
@@ -39,9 +40,11 @@ pub enum Metric {
 pub struct Puzzle {
     /// The cells of the puzzle.
     // Right now we're using u8 for representing the cells, if width * height > 255, we'll need to change this.
-    grid: Vec<Vec<u8>>,
+    grid: Vec<u8>,
     /// Series of moves that led to this state.
-    path: Vec<Direction>,
+    path: [Direction; MAX_DEPTH],
+    width: usize,
+    height: usize,
 }
 
 /// Result of solving the puzzle.
@@ -73,16 +76,28 @@ impl Hash for Puzzle {
 }
 
 impl Puzzle {
+    pub fn get(&mut self, width: usize, x: usize, y: usize) -> u8 {
+        self.grid[y * width + x]
+    }
+    pub fn set(&mut self, width: usize, x: usize, y: usize, value: u8) {
+        self.grid[y * width + x] = value;
+    }
+
     /// Returns solved puzzle with the given dimensions.
     pub fn new(width: usize, height: usize) -> Puzzle {
-        let mut grid = vec![vec![0; width]; height];
+        let mut grid = vec![0; width * height];
         for y in 0..height {
             for x in 0..width {
-                grid[y][x] = (y * height + x + 1) as u8;
+                grid[y * width + x] = (y * width + x + 1) as u8;
             }
         }
-        grid[width - 1][height - 1] = 0;
-        Puzzle { grid, path: vec![] }
+        grid[height * width - 1] = 0;
+        Puzzle {
+            grid,
+            path: [Direction::None; MAX_DEPTH],
+            width,
+            height,
+        }
     }
 
     /// Returns a puzzle from a file in which first line contains height and width
@@ -108,7 +123,7 @@ impl Puzzle {
         };
 
         // Create a new grid of cells with the given dimensions.
-        let mut grid = vec![vec![0; width]; height];
+        let mut grid = vec![0; width * height];
 
         // Iterate over the lines of the file, starting from the second line.
         for (y, line) in contents.lines().skip(1).enumerate() {
@@ -117,26 +132,31 @@ impl Puzzle {
             // Iterate over the elements of the line, and set the cell at the given coordinates to the value.
             for (x, value) in line_elements.enumerate() {
                 let value = value.map_err(|_err| FileReadError::FileIsCorrupt)?;
-                grid[y][x] = value as u8;
+                grid[y * width + x] = value as u8;
             }
         }
 
-        Ok(Puzzle { grid, path: vec![] })
+        Ok(Puzzle {
+            grid,
+            path: [Direction::None; MAX_DEPTH],
+            width,
+            height,
+        })
     }
 
     fn is_solved(&self) -> bool {
-        let height = self.grid.len();
-        let width = self.grid[0].len();
+        let width = self.width;
+        let height = self.height;
 
         // Check if 0 is on the last place.
-        if self.grid[height - 1][width - 1] != 0 {
+        if self.grid[self.grid.len() - 1] != 0 {
             return false;
         }
 
         // Check if the numbers from all but last row are in order.
         for y in 0..(height - 1) {
             for x in 0..width {
-                if self.grid[y][x] != (y * width + x + 1) as u8 {
+                if self.grid[y * width + x] != (y * width + x + 1) as u8 {
                     return false;
                 }
             }
@@ -144,7 +164,7 @@ impl Puzzle {
 
         // Check last row (without the last number, which should be 0).
         for x in 0..(width - 1) {
-            if self.grid[height - 1][x] != ((height - 1) * width + x + 1) as u8 {
+            if self.grid[width * (height - 1) + x] != ((height - 1) * width + x + 1) as u8 {
                 return false;
             }
         }
@@ -154,12 +174,9 @@ impl Puzzle {
     }
 
     fn empty_position(&self) -> (usize, usize) {
-        let height = self.grid.len();
-        let width = self.grid[0].len();
-
-        for y in 0..height {
-            for x in 0..width {
-                if self.grid[y][x] == 0 {
+        for y in 0..self.height {
+            for x in 0..self.width {
+                if self.grid[y * self.width + x] == 0 {
                     return (y, x);
                 }
             }
@@ -170,8 +187,6 @@ impl Puzzle {
 
     fn move_empty(&self, direction: &Direction) -> Option<Puzzle> {
         let (y, x) = self.empty_position();
-        let height = self.grid.len();
-        let width = self.grid[0].len();
 
         let mut new_x = x;
         let mut new_y = y;
@@ -185,7 +200,7 @@ impl Puzzle {
                 new_y = y - 1;
             }
             Direction::Down => {
-                if y == height - 1 {
+                if y == self.height - 1 {
                     return None;
                 }
                 new_y = y + 1;
@@ -197,27 +212,35 @@ impl Puzzle {
                 new_x = x - 1;
             }
             Direction::Right => {
-                if x == width - 1 {
+                if x == self.width - 1 {
                     return None;
                 }
                 new_x = x + 1;
+            }
+            Direction::None => {
+                return None;
             }
         }
 
         let mut new_puzzle = self.clone();
 
         // Swap the empty cell with the cell in the given direction.
-        new_puzzle.grid[y][x] = new_puzzle.grid[new_y][new_x];
-        new_puzzle.grid[new_y][new_x] = 0;
+        new_puzzle.grid[y * self.width + x] = new_puzzle.grid[new_y * self.width + new_x];
+        new_puzzle.grid[new_y * self.width + new_x] = 0;
 
         // Push the direction to the path which lead to this new state.
-        new_puzzle.path.push(direction.clone());
+        for i in 0..new_puzzle.path.len() {
+            if new_puzzle.path[i] == Direction::None {
+                new_puzzle.path[i] = *direction;
+                break;
+            }
+        }
 
         return Some(new_puzzle);
     }
 
     /// Returns vector of all possible moves from the current state in the given order.
-    fn get_neighbour_states(&mut self, order: &[Direction; 4]) -> Vec<Puzzle> {
+    fn get_neighbour_states(&self, order: &[Direction; 4]) -> Vec<Puzzle> {
         let mut neighbours = Vec::new();
 
         for direction in order {
@@ -227,6 +250,16 @@ impl Puzzle {
         }
 
         neighbours
+    }
+
+    fn path_depth(&self) -> usize {
+        let mut depth = 0;
+        for i in 0..self.path.len() {
+            if self.path[i] != Direction::None {
+                depth += 1;
+            }
+        }
+        depth
     }
 
     pub fn solve(&self, strategy: &Strategy) -> SolveResult {
@@ -241,7 +274,7 @@ impl Puzzle {
         // Queue of puzzles to be solved.
         let mut queue = VecDeque::new();
         // HashSet of already visited puzzles. We use it to check if we've already visited a puzzle.
-        let mut visited = HashSet::new();
+        let mut visited = HashSet::with_capacity(800000);
 
         // Push the initial state to the queue and visited.
         queue.push_back(self.clone());
@@ -264,7 +297,7 @@ impl Puzzle {
 
         // While the queue is not empty, we keep iterating.
         while !queue.is_empty() {
-            let mut current_state: Puzzle;
+            let current_state: Puzzle;
             // Depending on whetever we're doing BFS or DFS, we pop the first or last element.
             if is_dfs {
                 current_state = queue.pop_back().unwrap();
@@ -278,14 +311,16 @@ impl Puzzle {
             processed_states += 1;
 
             // Update the max depth of the search tree.
-            if current_state.path.len() > max_depth {
-                max_depth = current_state.path.len();
+            let depth = current_state.path_depth();
+
+            if depth > max_depth {
+                max_depth = depth;
             }
 
             // If the current state is solved, we've found the solution.
             if current_state.is_solved() {
                 return SolveResult {
-                    path: Some(current_state.path.clone()),
+                    path: Some(current_state.path.to_vec().clone()),
                     max_depth,
                     visited_states: visited.len(),
                     processed_states,
@@ -294,7 +329,7 @@ impl Puzzle {
             }
 
             // For DFS skip generating neighbour states if we're at MAX_DEPTH depth.
-            if is_dfs && current_state.path.len() == MAX_DEPTH {
+            if is_dfs && current_state.path[MAX_DEPTH - 1] != Direction::None {
                 continue;
             }
 
@@ -303,17 +338,19 @@ impl Puzzle {
 
             // Iterate over the neighbours.
             for neighbour in neighbour_states {
+                // If the state has already been visited, we compare length of it's path with the current state's path.
                 if let Some(previous) = visited.get(&neighbour) {
-                    if previous.path.len() > neighbour.path.len() {
-                        // If the state is already visited, but the path to it is shorter this time, we add it anyway,
+                    if previous.path_depth() > neighbour.path_depth() {
+                        // If neighbour's path to a certain state is shorter, we add it to the queue anyway,
                         // because maybe this time it'll be able to reach the solution.
-                        visited.replace(neighbour.clone());
                         queue.push_back(neighbour.clone());
+                        // We also replace the visited state.
+                        visited.replace(neighbour);
                     }
                 } else {
                     // If the neighbour is not visited, we push him to the queue and mark him as visited.
-                    visited.insert(neighbour.clone());
                     queue.push_back(neighbour.clone());
+                    visited.insert(neighbour);
                 }
             }
         }
@@ -335,9 +372,9 @@ impl Puzzle {
 
 impl std::fmt::Display for Puzzle {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        for row in &self.grid {
-            for cell in row {
-                write!(f, "{:3} ", cell)?;
+        for y in 0..self.height {
+            for x in 0..self.width {
+                write!(f, "{:3} ", self.grid[y * self.width + x])?;
             }
             write!(f, "\n")?;
         }
@@ -367,6 +404,7 @@ impl std::fmt::Display for Direction {
             Direction::Down => write!(f, "Down"),
             Direction::Left => write!(f, "Left"),
             Direction::Right => write!(f, "Right"),
+            &Direction::None => write!(f, "_"),
         }
     }
 }
