@@ -81,7 +81,7 @@ fn main() {
         std::process::exit(1);
     });
 
-    let puzzle = Puzzle::from_file(&config.input_file).unwrap_or_else(|err| {
+    let mut puzzle = Puzzle::from_file(&config.input_file).unwrap_or_else(|err| {
         match err {
             puzzle::FileReadError::FileNotFound => {
                 println!("File not found: {}", config.input_file);

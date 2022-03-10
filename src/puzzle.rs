@@ -1,4 +1,5 @@
-use std::collections::{HashSet, VecDeque};
+use std::cmp::Ordering;
+use std::collections::{BinaryHeap, HashSet, VecDeque};
 use std::fs;
 use std::hash::Hash;
 use std::time::Instant;
@@ -45,6 +46,7 @@ pub struct Puzzle {
     path: [Direction; MAX_DEPTH],
     width: usize,
     height: usize,
+    metric: u32,
 }
 
 /// Result of solving the puzzle.
@@ -75,12 +77,29 @@ impl Hash for Puzzle {
     }
 }
 
+impl Ord for Puzzle {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.metric.cmp(&other.metric).reverse()
+    }
+}
+
+impl PartialOrd for Puzzle {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 impl Puzzle {
     pub fn get(&mut self, width: usize, x: usize, y: usize) -> u8 {
         self.grid[y * width + x]
     }
     pub fn set(&mut self, width: usize, x: usize, y: usize, value: u8) {
         self.grid[y * width + x] = value;
+    }
+
+    /// Increases the metric score by a given amount
+    pub fn incr_metric(&mut self, i: u32) {
+        self.metric += i;
     }
 
     /// Returns solved puzzle with the given dimensions.
@@ -91,12 +110,14 @@ impl Puzzle {
                 grid[y * width + x] = (y * width + x + 1) as u8;
             }
         }
+
         grid[height * width - 1] = 0;
         Puzzle {
             grid,
             path: [Direction::None; MAX_DEPTH],
             width,
             height,
+            metric: 0,
         }
     }
 
@@ -141,6 +162,7 @@ impl Puzzle {
             path: [Direction::None; MAX_DEPTH],
             width,
             height,
+            metric: 0,
         })
     }
 
@@ -239,12 +261,65 @@ impl Puzzle {
         return Some(new_puzzle);
     }
 
+    pub fn correct_place(&self, value: u8) -> (u8, u8) {
+        let mut x_cor: u8 = 0;
+        let mut y_cor: u8 = 0;
+        if value == 0 {
+            return (3, 3);
+        };
+        for x in 0..4_u8 {
+            for y in 0..4_u8 {
+                // correct y = val / 4
+                // correct x = (val % 4) - 1
+                y_cor = (value - 1) / 4;
+                x_cor = (value - 1) % 4;
+            }
+        }
+        (x_cor, y_cor)
+    }
+
+    /// Returns a Manhattan metric score of a board.
+    /// The score is the sum of metric differences of wrongly placed tiles
+    /// from their correct position.
+    pub fn manhattan_metric(&self) -> u32 {
+        let mut score: u32 = 0;
+        for x in 0..4_u8 {
+            for y in 0..4_u8 {
+                let (x_cor, y_cor) = self.correct_place(self.grid[(x + 4 * y) as usize]);
+                if x != x_cor || y != y_cor {
+                    score += (x as i32 - x_cor as i32).abs() as u32;
+                    score += (y as i32 - y_cor as i32).abs() as u32;
+                }
+            }
+        }
+        score
+    }
+
+    /// Returns a Hamming metric score of a board.
+    /// The score is the number of tiles that are on incorrect places.
+    pub fn hamming_metric(&self) -> u32 {
+        let mut score: u32 = 0;
+        for x in 0..4 {
+            for y in 0..4 {
+                // checking if either x or y or both are incorrect, if yes then increment the score
+                let (x_cor, y_cor) = self.correct_place(self.grid[(x + 4 * y) as usize]);
+                if x != x_cor || y != y_cor {
+                    score += 1;
+                }
+            }
+        }
+        score
+    }
+
     /// Returns vector of all possible moves from the current state in the given order.
     fn get_neighbour_states(&self, order: &[Direction; 4]) -> Vec<Puzzle> {
         let mut neighbours = Vec::new();
 
         for direction in order {
-            if let Some(new_puzzle) = self.move_empty(direction) {
+            if let Some(mut new_puzzle) = self.move_empty(direction) {
+                // For A* purposes
+                new_puzzle.incr_metric(1);
+
                 neighbours.push(new_puzzle);
             }
         }
@@ -366,6 +441,42 @@ impl Puzzle {
     }
 
     fn solve_priority(&self, metric: &Metric) -> SolveResult {
+        // Queue of puzzles to be solved.
+        let mut queue = BinaryHeap::new();
+        // Set of already visited states.
+        let mut visited = HashSet::with_capacity(800000);
+        // Push the initial state to both queue and visited.
+        queue.push(self.clone());
+        visited.insert(self.clone());
+
+        let mut max_depth = 0;
+        let mut processed_states = 0;
+
+        let start_time = Instant::now();
+
+        // While the queue is not empty, continue iterating.
+        while !queue.is_empty() {
+            let current: Puzzle;
+
+            // Since we're using Priority Queue with a reversed order,
+            // we're popping the Puzzle with the smallest metric value.
+            current = queue.pop().unwrap();
+
+            processed_states += 1;
+
+            let depth = current.path_depth();
+
+            if current.is_solved() {
+                return SolveResult {
+                    path: Some(current.path.to_vec().clone()),
+                    max_depth,
+                    visited_states: visited.len(),
+                    processed_states,
+                    time_spent: start_time.elapsed().as_nanos(),
+                };
+            }
+        }
+
         todo!()
     }
 }
