@@ -29,7 +29,7 @@ pub enum Strategy {
     AStar(Metric),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum Metric {
     Hamming,
     Manhattan,
@@ -261,14 +261,15 @@ impl Puzzle {
         return Some(new_puzzle);
     }
 
+    /// Returns correct coordinates of a given value.
     pub fn correct_place(&self, value: u8) -> (u8, u8) {
         let mut x_cor: u8 = 0;
         let mut y_cor: u8 = 0;
         if value == 0 {
             return (3, 3);
         };
-        for x in 0..4_u8 {
-            for y in 0..4_u8 {
+        for _x in 0..4_u8 {
+            for _y in 0..4_u8 {
                 // correct y = val / 4
                 // correct x = (val % 4) - 1
                 y_cor = (value - 1) / 4;
@@ -312,18 +313,32 @@ impl Puzzle {
     }
 
     /// Returns vector of all possible moves from the current state in the given order.
-    fn get_neighbour_states(&self, order: &[Direction; 4]) -> Vec<Puzzle> {
+    fn get_neighbour_states(&self, order: &[Direction; 4], metric: Option<Metric>) -> Vec<Puzzle> {
         let mut neighbours = Vec::new();
 
         for direction in order {
             if let Some(mut new_puzzle) = self.move_empty(direction) {
                 // For A* purposes
-                new_puzzle.incr_metric(1);
+                match &metric {
+                    Some(met) => {
+                        match met {
+                            // If a metric is supplied, we increase the new board's metric by
+                            // a calculated amount and 1 to add for the move cost.
+                            Metric::Hamming => {
+                                new_puzzle.incr_metric(new_puzzle.hamming_metric());
+                            }
+                            Metric::Manhattan => {
+                                new_puzzle.incr_metric(new_puzzle.manhattan_metric());
+                            }
+                        }
+                        new_puzzle.incr_metric(1);
+                    }
+                    None => {}
+                }
 
                 neighbours.push(new_puzzle);
             }
         }
-
         neighbours
     }
 
@@ -409,7 +424,7 @@ impl Puzzle {
             }
 
             // Get the neighbour states of the current state.
-            let neighbour_states = current_state.get_neighbour_states(order);
+            let neighbour_states = current_state.get_neighbour_states(order, None);
 
             // Iterate over the neighbours.
             for neighbour in neighbour_states {
@@ -466,6 +481,10 @@ impl Puzzle {
 
             let depth = current.path_depth();
 
+            if depth > max_depth {
+                max_depth = depth;
+            }
+
             if current.is_solved() {
                 return SolveResult {
                     path: Some(current.path.to_vec().clone()),
@@ -475,9 +494,36 @@ impl Puzzle {
                     time_spent: start_time.elapsed().as_nanos(),
                 };
             }
+            // We're creating any order array but since this is an A* algorithm it does not matter.
+            // We're doing it just so the get_neighbour_states works.
+            let order: &[Direction; 4] = &[
+                Direction::Left,
+                Direction::Up,
+                Direction::Right,
+                Direction::Down,
+            ];
+            let neighbour_states = current.get_neighbour_states(order, Some(*metric));
+
+            for neighbour in neighbour_states {
+                if let Some(previous) = visited.get(&neighbour) {
+                    if previous.path_depth() > neighbour.path_depth() {
+                        queue.push(neighbour.clone());
+                        visited.replace(neighbour);
+                    }
+                } else {
+                    queue.push(neighbour.clone());
+                    visited.insert(neighbour);
+                }
+            }
         }
 
-        todo!()
+        SolveResult {
+            path: None,
+            max_depth,
+            visited_states: visited.len(),
+            processed_states,
+            time_spent: start_time.elapsed().as_nanos(),
+        }
     }
 }
 
