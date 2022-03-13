@@ -13,8 +13,8 @@ enum ArgsError {
 struct Config {
     pub strategy: Strategy,
     pub input_file: String,
-    pub solution_file: String,
-    pub stats_file: String,
+    pub _solution_file: String,
+    pub _stats_file: String,
 }
 
 impl Config {
@@ -43,9 +43,9 @@ impl Config {
                     }
                 }
                 if strategy == "bfs" {
-                    Strategy::BFS(directions)
+                    Strategy::Bfs(directions)
                 } else {
-                    Strategy::DFS(directions)
+                    Strategy::Dfs(directions)
                 }
             }
             "astr" => {
@@ -62,8 +62,8 @@ impl Config {
         Ok(Config {
             strategy,
             input_file,
-            solution_file,
-            stats_file,
+            _solution_file: solution_file,
+            _stats_file: stats_file,
         })
     }
 }
@@ -83,13 +83,13 @@ fn main() {
 
     let puzzle = Puzzle::from_file(&config.input_file).unwrap_or_else(|err| {
         match err {
-            puzzle::FileReadError::FileNotFound => {
+            puzzle::FileReadError::NotFound => {
                 println!("File not found: {}", config.input_file);
             }
-            puzzle::FileReadError::FileIsEmpty => {
+            puzzle::FileReadError::IsEmpty => {
                 println!("File is empty: {}", config.input_file);
             }
-            puzzle::FileReadError::FileIsCorrupt => {
+            puzzle::FileReadError::IsCorrupt => {
                 println!("File is corrupted: {}", config.input_file);
             }
         }

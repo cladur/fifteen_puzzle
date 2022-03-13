@@ -8,9 +8,9 @@ const MAX_DEPTH: usize = 20;
 
 #[derive(Debug)]
 pub enum FileReadError {
-    FileNotFound,
-    FileIsEmpty,
-    FileIsCorrupt,
+    NotFound,
+    IsEmpty,
+    IsCorrupt,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -24,8 +24,8 @@ pub enum Direction {
 
 #[derive(Debug)]
 pub enum Strategy {
-    BFS([Direction; 4]),
-    DFS([Direction; 4]),
+    Bfs([Direction; 4]),
+    Dfs([Direction; 4]),
     AStar(Metric),
 }
 
@@ -90,20 +90,8 @@ impl PartialOrd for Puzzle {
 }
 
 impl Puzzle {
-    pub fn get(&mut self, width: usize, x: usize, y: usize) -> u8 {
-        self.grid[y * width + x]
-    }
-    pub fn set(&mut self, width: usize, x: usize, y: usize, value: u8) {
-        self.grid[y * width + x] = value;
-    }
-
-    /// Increases the metric score by a given amount
-    pub fn incr_metric(&mut self, i: u32) {
-        self.metric += i;
-    }
-
     /// Returns solved puzzle with the given dimensions.
-    pub fn new(width: usize, height: usize) -> Puzzle {
+    pub fn _new(width: usize, height: usize) -> Puzzle {
         let mut grid = vec![0; width * height];
         for y in 0..height {
             for x in 0..width {
@@ -125,9 +113,9 @@ impl Puzzle {
     /// and the next ones values of cells seperated by spaces.
     pub fn from_file(path: &str) -> Result<Puzzle, FileReadError> {
         // Read contents of file, if we fail to do that, the file probably doesn't exist.
-        let contents = fs::read_to_string(path).map_err(|_err| FileReadError::FileNotFound)?;
+        let contents = fs::read_to_string(path).map_err(|_err| FileReadError::NotFound)?;
         // Get first line of file, if we fail to do that, file is empty.
-        let first_line = contents.lines().next().ok_or(FileReadError::FileIsEmpty)?;
+        let first_line = contents.lines().next().ok_or(FileReadError::IsEmpty)?;
 
         // First line of file should contain the dimensions of the puzzle.
         // We're splitting first line by whitespace, and parse the first two elements from &str to usize.
@@ -136,11 +124,11 @@ impl Puzzle {
         // If these two elements were valid, we pull them out of Option<Result<>>, otherwise the file is corrupted.
         let height = match dimensions.next() {
             Some(Ok(height)) => height,
-            _ => return Err(FileReadError::FileIsCorrupt),
+            _ => return Err(FileReadError::IsCorrupt),
         };
         let width = match dimensions.next() {
             Some(Ok(width)) => width,
-            _ => return Err(FileReadError::FileIsCorrupt),
+            _ => return Err(FileReadError::IsCorrupt),
         };
 
         // Create a new grid of cells with the given dimensions.
@@ -152,7 +140,7 @@ impl Puzzle {
             let line_elements = line.split_whitespace().map(|s| s.parse::<u32>());
             // Iterate over the elements of the line, and set the cell at the given coordinates to the value.
             for (x, value) in line_elements.enumerate() {
-                let value = value.map_err(|_err| FileReadError::FileIsCorrupt)?;
+                let value = value.map_err(|_err| FileReadError::IsCorrupt)?;
                 grid[y * width + x] = value as u8;
             }
         }
@@ -192,7 +180,7 @@ impl Puzzle {
         }
 
         // If we got here, the puzzle is valid.
-        return true;
+        true
     }
 
     fn empty_position(&self) -> (usize, usize) {
@@ -258,25 +246,25 @@ impl Puzzle {
             }
         }
 
-        return Some(new_puzzle);
+        Some(new_puzzle)
     }
 
     /// Returns correct coordinates of a given value.
-    pub fn correct_place(&self, value: u8) -> (u8, u8) {
-        let mut x_cor: u8 = 0;
-        let mut y_cor: u8 = 0;
+    pub fn correct_place(&self, value: u8) -> (usize, usize) {
         if value == 0 {
-            return (3, 3);
+            return (self.width - 1, self.height - 1);
         };
-        for _x in 0..4_u8 {
-            for _y in 0..4_u8 {
-                // correct y = val / 4
-                // correct x = (val % 4) - 1
-                y_cor = (value - 1) / 4;
-                x_cor = (value - 1) % 4;
+
+        for y in 0..self.height {
+            for x in 0..self.width {
+                if (y * self.width + x + 1) as u8 == value {
+                    return (x, y);
+                }
             }
         }
-        (x_cor, y_cor)
+
+        // If we arrived here, the puzzle is corrupted.
+        panic!()
     }
 
     /// Returns a Manhattan metric score of a board.
@@ -284,13 +272,17 @@ impl Puzzle {
     /// from their correct position.
     pub fn manhattan_metric(&self) -> u32 {
         let mut score: u32 = 0;
-        for x in 0..4_u8 {
-            for y in 0..4_u8 {
-                let (x_cor, y_cor) = self.correct_place(self.grid[(x + 4 * y) as usize]);
-                if x != x_cor || y != y_cor {
-                    score += (x as i32 - x_cor as i32).abs() as u32;
-                    score += (y as i32 - y_cor as i32).abs() as u32;
+        for y in 0..self.height {
+            for x in 0..self.width {
+                // The empty cell (0) is not considered in Manhattan metric.
+                if self.grid[self.width * y + x] == 0 {
+                    continue;
                 }
+                // Check where value of the current cell is supposed to be.
+                let (correct_x, correct_y) = self.correct_place(self.grid[self.width * y + x]);
+                // Add the difference between the current cell and its correct position to the score.
+                score += (x as i32 - correct_x as i32).abs() as u32;
+                score += (y as i32 - correct_y as i32).abs() as u32;
             }
         }
         score
@@ -300,11 +292,15 @@ impl Puzzle {
     /// The score is the number of tiles that are on incorrect places.
     pub fn hamming_metric(&self) -> u32 {
         let mut score: u32 = 0;
-        for x in 0..4 {
-            for y in 0..4 {
-                // checking if either x or y or both are incorrect, if yes then increment the score
-                let (x_cor, y_cor) = self.correct_place(self.grid[(x + 4 * y) as usize]);
-                if x != x_cor || y != y_cor {
+        for y in 0..self.height {
+            for x in 0..self.width {
+                // The empty cell (0) is not considered in Hamming metric.
+                if self.grid[self.width * y + x] == 0 {
+                    continue;
+                }
+                // Check if either x or y or both are incorrect, if yes then increment the score.
+                let (correct_x, correct_y) = self.correct_place(self.grid[self.width * y + x]);
+                if x != correct_x || y != correct_y {
                     score += 1;
                 }
             }
@@ -325,13 +321,14 @@ impl Puzzle {
                             // If a metric is supplied, we increase the new board's metric by
                             // a calculated amount and 1 to add for the move cost.
                             Metric::Hamming => {
-                                new_puzzle.incr_metric(new_puzzle.hamming_metric());
+                                new_puzzle.metric =
+                                    new_puzzle.path_depth() as u32 + new_puzzle.hamming_metric();
                             }
                             Metric::Manhattan => {
-                                new_puzzle.incr_metric(new_puzzle.manhattan_metric());
+                                new_puzzle.metric =
+                                    new_puzzle.path_depth() as u32 + new_puzzle.manhattan_metric();
                             }
                         }
-                        new_puzzle.incr_metric(1);
                     }
                     None => {}
                 }
@@ -354,8 +351,8 @@ impl Puzzle {
 
     pub fn solve(&self, strategy: &Strategy) -> SolveResult {
         match strategy {
-            Strategy::BFS(order) => self.solve_basic(order, false),
-            Strategy::DFS(order) => self.solve_basic(order, true),
+            Strategy::Bfs(order) => self.solve_basic(order, false),
+            Strategy::Dfs(order) => self.solve_basic(order, true),
             Strategy::AStar(metric) => self.solve_priority(metric),
         }
     }
@@ -410,7 +407,7 @@ impl Puzzle {
             // If the current state is solved, we've found the solution.
             if current_state.is_solved() {
                 return SolveResult {
-                    path: Some(current_state.path.to_vec().clone()),
+                    path: Some(current_state.path.to_vec()),
                     max_depth,
                     visited_states: visited.len(),
                     processed_states,
@@ -460,6 +457,7 @@ impl Puzzle {
         let mut queue = BinaryHeap::new();
         // Set of already visited states.
         let mut visited = HashSet::with_capacity(800000);
+
         // Push the initial state to both queue and visited.
         queue.push(self.clone());
         visited.insert(self.clone());
@@ -471,29 +469,28 @@ impl Puzzle {
 
         // While the queue is not empty, continue iterating.
         while !queue.is_empty() {
-            let current: Puzzle;
-
             // Since we're using Priority Queue with a reversed order,
             // we're popping the Puzzle with the smallest metric value.
-            current = queue.pop().unwrap();
+            let current_state = queue.pop().unwrap();
 
             processed_states += 1;
 
-            let depth = current.path_depth();
+            let depth = current_state.path_depth();
 
             if depth > max_depth {
                 max_depth = depth;
             }
 
-            if current.is_solved() {
+            if current_state.is_solved() {
                 return SolveResult {
-                    path: Some(current.path.to_vec().clone()),
+                    path: Some(current_state.path.to_vec()),
                     max_depth,
                     visited_states: visited.len(),
                     processed_states,
                     time_spent: start_time.elapsed().as_nanos(),
                 };
             }
+
             // We're creating any order array but since this is an A* algorithm it does not matter.
             // We're doing it just so the get_neighbour_states works.
             let order: &[Direction; 4] = &[
@@ -502,15 +499,11 @@ impl Puzzle {
                 Direction::Right,
                 Direction::Down,
             ];
-            let neighbour_states = current.get_neighbour_states(order, Some(*metric));
+
+            let neighbour_states = current_state.get_neighbour_states(order, Some(*metric));
 
             for neighbour in neighbour_states {
-                if let Some(previous) = visited.get(&neighbour) {
-                    if previous.path_depth() > neighbour.path_depth() {
-                        queue.push(neighbour.clone());
-                        visited.replace(neighbour);
-                    }
-                } else {
+                if !visited.contains(&neighbour) {
                     queue.push(neighbour.clone());
                     visited.insert(neighbour);
                 }
@@ -533,7 +526,7 @@ impl std::fmt::Display for Puzzle {
             for x in 0..self.width {
                 write!(f, "{:3} ", self.grid[y * self.width + x])?;
             }
-            write!(f, "\n")?;
+            writeln!(f)?;
         }
         Ok(())
     }
@@ -541,11 +534,11 @@ impl std::fmt::Display for Puzzle {
 
 impl std::fmt::Display for SolveResult {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "Path: {:?}\n", self.path)?;
-        write!(f, "Max depth: {}\n", self.max_depth)?;
-        write!(f, "Visited states: {}\n", self.visited_states)?;
-        write!(f, "Processed states: {}\n", self.processed_states)?;
-        write!(
+        writeln!(f, "Path: {:?}", self.path)?;
+        writeln!(f, "Max depth: {}", self.max_depth)?;
+        writeln!(f, "Visited states: {}", self.visited_states)?;
+        writeln!(f, "Processed states: {}", self.processed_states)?;
+        writeln!(
             f,
             "Time spent: {:.3}\n",
             self.time_spent as f32 * f32::powi(10.0, -6)

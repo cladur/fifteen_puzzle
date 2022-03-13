@@ -20,8 +20,8 @@
                 }
             },
             "args": [
-                "dfs",
-                "LUDR",
+                "astr",
+                "hamm",
                 "puzzle.txt",
                 "output.txt",
                 "stats.txt"
