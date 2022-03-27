@@ -13,8 +13,8 @@ enum ArgsError {
 struct Config {
     pub strategy: Strategy,
     pub input_file: String,
-    pub _solution_file: String,
-    pub _stats_file: String,
+    pub solution_file: String,
+    pub stats_file: String,
 }
 
 impl Config {
@@ -62,8 +62,8 @@ impl Config {
         Ok(Config {
             strategy,
             input_file,
-            _solution_file: solution_file,
-            _stats_file: stats_file,
+            solution_file,
+            stats_file,
         })
     }
 }
@@ -98,5 +98,40 @@ fn main() {
 
     let solution = puzzle.solve(&config.strategy);
 
-    println!("{}", solution);
+    let solution_file_content = match &solution.path {
+        Some(path) => {
+            let mut steps = String::new();
+            for step in path {
+                steps.push(match step {
+                    Direction::Up => 'U',
+                    Direction::Down => 'D',
+                    Direction::Left => 'L',
+                    Direction::Right => 'R',
+                    Direction::None => panic!(),
+                });
+            }
+            format!("{}\n{}", &path.len(), steps)
+        }
+        None => String::from("-1"),
+    };
+
+    let path_len = match solution.path {
+        Some(path) => path.len().to_string(),
+        None => "-1".to_string(),
+    };
+
+    let stats_file_content = format!(
+        "{}\n{}\n{}\n{}\n{:.3}",
+        path_len,
+        solution.visited_states,
+        solution.processed_states,
+        solution.max_depth,
+        solution.time_spent as f32 * 10.0_f32.powi(-6)
+    );
+
+    std::fs::write(&config.solution_file, solution_file_content)
+        .expect(format!("Error writing solution to file: {}", &config.solution_file).as_str());
+
+    std::fs::write(&config.stats_file, stats_file_content)
+        .expect(format!("Error writing stats to file: {}", &config.stats_file).as_str());
 }

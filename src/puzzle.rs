@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashSet, VecDeque};
-use std::fs;
+use std::fs::{self, DirBuilder};
 use std::hash::Hash;
 use std::time::Instant;
 
@@ -20,6 +20,18 @@ pub enum Direction {
     Left,
     Right,
     None,
+}
+
+impl Direction {
+    pub fn opposite(&self) -> Direction {
+        match self {
+            Direction::Up => Direction::Down,
+            Direction::Down => Direction::Up,
+            Direction::Left => Direction::Right,
+            Direction::Right => Direction::Left,
+            Direction::None => Direction::None,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -52,15 +64,15 @@ pub struct Puzzle {
 /// Result of solving the puzzle.
 pub struct SolveResult {
     /// Solution of puzzle or none if puzzle is unsolvable.
-    path: Option<Vec<Direction>>,
+    pub path: Option<Vec<Direction>>,
     /// Number of visited states.
-    visited_states: usize,
+    pub visited_states: usize,
     /// Number of processed states.
-    processed_states: usize,
+    pub processed_states: usize,
     /// Maximum depth of the search tree.
-    max_depth: usize,
+    pub max_depth: usize,
     /// Time spent in milliseconds.
-    time_spent: u128,
+    pub time_spent: u128,
 }
 
 impl PartialEq for Puzzle {
@@ -255,16 +267,10 @@ impl Puzzle {
             return (self.width - 1, self.height - 1);
         };
 
-        for y in 0..self.height {
-            for x in 0..self.width {
-                if (y * self.width + x + 1) as u8 == value {
-                    return (x, y);
-                }
-            }
-        }
+        let x = (value - 1) as usize % self.width;
+        let y = (value - 1) as usize / self.width;
 
-        // If we arrived here, the puzzle is corrupted.
-        panic!()
+        return (x, y);
     }
 
     /// Returns a Manhattan metric score of a board.
@@ -272,18 +278,19 @@ impl Puzzle {
     /// from their correct position.
     pub fn manhattan_metric(&self) -> u32 {
         let mut score: u32 = 0;
-        for y in 0..self.height {
-            for x in 0..self.width {
-                // The empty cell (0) is not considered in Manhattan metric.
-                if self.grid[self.width * y + x] == 0 {
-                    continue;
-                }
-                // Check where value of the current cell is supposed to be.
-                let (correct_x, correct_y) = self.correct_place(self.grid[self.width * y + x]);
-                // Add the difference between the current cell and its correct position to the score.
-                score += (x as i32 - correct_x as i32).abs() as u32;
-                score += (y as i32 - correct_y as i32).abs() as u32;
+        for (i, value) in self.grid.iter().enumerate() {
+            // The empty cell (0) is not considered in Manhattan metric.
+            if *value == 0 {
+                continue;
             }
+            // Check where value of the current cell is supposed to be.
+            let (correct_x, correct_y) = self.correct_place(*value);
+
+            let x = i % self.width;
+            let y = i / self.width;
+            // Add the difference between the current cell and its correct position to the score.
+            score += (x as i32 - correct_x as i32).abs() as u32;
+            score += (y as i32 - correct_y as i32).abs() as u32;
         }
         score
     }
@@ -292,17 +299,14 @@ impl Puzzle {
     /// The score is the number of tiles that are on incorrect places.
     pub fn hamming_metric(&self) -> u32 {
         let mut score: u32 = 0;
-        for y in 0..self.height {
-            for x in 0..self.width {
-                // The empty cell (0) is not considered in Hamming metric.
-                if self.grid[self.width * y + x] == 0 {
-                    continue;
-                }
-                // Check if either x or y or both are incorrect, if yes then increment the score.
-                let (correct_x, correct_y) = self.correct_place(self.grid[self.width * y + x]);
-                if x != correct_x || y != correct_y {
-                    score += 1;
-                }
+        for (i, value) in self.grid.iter().enumerate() {
+            // The empty cell (0) is not considered in Hamming metric.
+            if *value == 0 {
+                continue;
+            }
+            // Add 1 to the score if the current cell has the right value.
+            if *value != (i + 1) as u8 {
+                score += 1;
             }
         }
         score
@@ -313,23 +317,30 @@ impl Puzzle {
         let mut neighbours = Vec::new();
 
         for direction in order {
+            // If were' going back to where we came from, skip it.
+            let last_move = if self.path_depth() > 0 {
+                self.path[self.path_depth() - 1]
+            } else {
+                Direction::None
+            };
+            if direction.opposite() == last_move {
+                continue;
+            }
+
             if let Some(mut new_puzzle) = self.move_empty(direction) {
                 // For A* purposes
                 match &metric {
-                    Some(met) => {
-                        match met {
-                            // If a metric is supplied, we increase the new board's metric by
-                            // a calculated amount and 1 to add for the move cost.
-                            Metric::Hamming => {
-                                new_puzzle.metric =
-                                    new_puzzle.path_depth() as u32 + new_puzzle.hamming_metric();
-                            }
-                            Metric::Manhattan => {
-                                new_puzzle.metric =
-                                    new_puzzle.path_depth() as u32 + new_puzzle.manhattan_metric();
-                            }
+                    Some(met) => match met {
+                        // Metric of a state is the sum of it's path length and given heuristic.
+                        Metric::Hamming => {
+                            new_puzzle.metric =
+                                new_puzzle.path_depth() as u32 + new_puzzle.hamming_metric();
                         }
-                    }
+                        Metric::Manhattan => {
+                            new_puzzle.metric =
+                                new_puzzle.path_depth() as u32 + new_puzzle.manhattan_metric();
+                        }
+                    },
                     None => {}
                 }
 
@@ -347,6 +358,16 @@ impl Puzzle {
             }
         }
         depth
+    }
+
+    fn path_to_vec(&self) -> Vec<Direction> {
+        let mut path = Vec::new();
+        for i in 0..self.path.len() {
+            if self.path[i] != Direction::None {
+                path.push(self.path[i]);
+            }
+        }
+        path
     }
 
     pub fn solve(&self, strategy: &Strategy) -> SolveResult {
@@ -407,7 +428,7 @@ impl Puzzle {
             // If the current state is solved, we've found the solution.
             if current_state.is_solved() {
                 return SolveResult {
-                    path: Some(current_state.path.to_vec()),
+                    path: Some(current_state.path_to_vec()),
                     max_depth,
                     visited_states: visited.len(),
                     processed_states,
@@ -482,8 +503,15 @@ impl Puzzle {
             }
 
             if current_state.is_solved() {
+                let mut path = Vec::new();
+                for i in 0..current_state.path.len() {
+                    if current_state.path[i] != Direction::None {
+                        path.push(current_state.path[i]);
+                    }
+                }
                 return SolveResult {
-                    path: Some(current_state.path.to_vec()),
+                    // path: Some(current_state.path.to_vec()),
+                    path: Some(path),
                     max_depth,
                     visited_states: visited.len(),
                     processed_states,
@@ -503,7 +531,17 @@ impl Puzzle {
             let neighbour_states = current_state.get_neighbour_states(order, Some(*metric));
 
             for neighbour in neighbour_states {
-                if !visited.contains(&neighbour) {
+                // If the state has already been visited, we compare length of it's path with the current state's path.
+                if let Some(previous) = visited.get(&neighbour) {
+                    if previous.path_depth() > neighbour.path_depth() {
+                        // If neighbour's path to a certain state is shorter, we add it to the queue anyway,
+                        // because maybe this time it'll be able to reach the solution.
+                        queue.push(neighbour.clone());
+                        // We also replace the visited state.
+                        visited.replace(neighbour);
+                    }
+                } else {
+                    // If the neighbour is not visited, we push him to the queue and mark him as visited.
                     queue.push(neighbour.clone());
                     visited.insert(neighbour);
                 }

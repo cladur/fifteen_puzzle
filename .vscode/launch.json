@@ -21,7 +21,7 @@
             },
             "args": [
                 "astr",
-                "hamm",
+                "manh",
                 "puzzle.txt",
                 "output.txt",
                 "stats.txt"
