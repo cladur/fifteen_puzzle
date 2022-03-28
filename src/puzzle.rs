@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashSet, VecDeque};
-use std::fs::{self, DirBuilder};
+use std::fs;
 use std::hash::Hash;
 use std::time::Instant;
 

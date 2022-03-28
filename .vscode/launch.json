@@ -20,8 +20,8 @@
                 }
             },
             "args": [
-                "astr",
-                "manh",
+                "bfs",
+                "LUDR",
                 "puzzle.txt",
                 "output.txt",
                 "stats.txt"
